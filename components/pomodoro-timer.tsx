@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Play, Pause, RotateCcw, Settings, SkipForward } from "lucide-react"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Play, Pause, RotateCcw, Settings, SkipForward, Link } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { Habit } from "@/lib/types"
 
 type TimerState = "idle" | "running" | "paused"
 type SessionType = "work" | "break"
@@ -17,14 +19,15 @@ type PomodoroConfig = {
   rest: number
 }
 
-const DEFAULT_CONFIG: PomodoroConfig = {
-  work: 25,
-  rest: 5,
-}
-
+const DEFAULT_CONFIG: PomodoroConfig = { work: 25, rest: 5 }
 const POMODORO_CONFIG_STORAGE_KEY = "habitflow.pomodoro.config.v2"
 
-export function PomodoroTimer() {
+interface PomodoroTimerProps {
+  habits: Habit[]
+  onSessionComplete: (habitId: string | undefined, focusMinutes: number) => void
+}
+
+export function PomodoroTimer({ habits = [], onSessionComplete }: PomodoroTimerProps) {
   const [config, setConfig] = useState<PomodoroConfig>(DEFAULT_CONFIG)
   const [draftConfig, setDraftConfig] = useState<PomodoroConfig>(DEFAULT_CONFIG)
   const [timeLeft, setTimeLeft] = useState(DEFAULT_CONFIG.work * 60)
@@ -33,6 +36,7 @@ export function PomodoroTimer() {
   const [completedSessions, setCompletedSessions] = useState(0)
   const [showSettings, setShowSettings] = useState(false)
   const [isHydrated, setIsHydrated] = useState(false)
+  const [selectedHabitId, setSelectedHabitId] = useState<string>("none")
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
@@ -96,6 +100,7 @@ export function PomodoroTimer() {
     setTimerState("idle")
     if (sessionType === "work") {
       setCompletedSessions((prev) => prev + 1)
+      onSessionComplete(selectedHabitId === "none" ? undefined : selectedHabitId, config.work)
       setSessionType("break")
       setTimeLeft(sessionDurations.break)
     } else {
@@ -107,6 +112,7 @@ export function PomodoroTimer() {
   const skipToBreak = () => {
     setTimerState("idle")
     setCompletedSessions((prev) => prev + 1)
+    onSessionComplete(selectedHabitId === "none" ? undefined : selectedHabitId, config.work)
     setSessionType("break")
     setTimeLeft(sessionDurations.break)
   }
@@ -140,23 +146,27 @@ export function PomodoroTimer() {
   }
 
   const progress = ((sessionDurations[sessionType] - timeLeft) / sessionDurations[sessionType]) * 100
+  const linkedHabit = habits.find((h) => h.id === selectedHabitId)
 
   return (
     <Card className="animate-scale-in">
       <CardContent className="p-6 space-y-6">
-        {/* Session Type Indicator */}
+        {/* Session Type */}
         <div className="text-center">
           <h3 className="text-lg font-semibold font-space-grotesk mb-2">
             {sessionType === "work" ? "Trabajo" : "Descanso"}
           </h3>
           <div className="flex justify-center gap-2">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="w-2 h-2 rounded-full bg-muted" />
+              <div
+                key={i}
+                className={cn("w-2 h-2 rounded-full", i < completedSessions % 4 ? "bg-accent" : "bg-muted")}
+              />
             ))}
           </div>
         </div>
 
-        {/* Timer Display */}
+        {/* Timer */}
         <div className="text-center space-y-4">
           <div
             className={cn(
@@ -167,18 +177,45 @@ export function PomodoroTimer() {
           >
             {formatTime(timeLeft)}
           </div>
-
           <Progress
             value={progress}
-            className={cn(
-              "h-2 transition-all duration-300",
-              sessionType === "work" ? "[&>div]:bg-accent" : "[&>div]:bg-chart-2",
-            )}
+            className={cn("h-2 transition-all duration-300", sessionType === "work" ? "[&>div]:bg-accent" : "[&>div]:bg-chart-2")}
           />
         </div>
 
+        {/* Habit linker (only in work sessions) */}
+        {sessionType === "work" && habits.length > 0 && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-dm-sans flex items-center gap-1.5 text-muted-foreground">
+              <Link className="h-3 w-3" />
+              Vincular sesión a hábito
+            </Label>
+            <Select value={selectedHabitId} onValueChange={setSelectedHabitId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Sin vincular" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Sin vincular</SelectItem>
+                {habits.map((h) => (
+                  <SelectItem key={h.id} value={h.id}>
+                    <div className="flex items-center gap-2">
+                      <div className={cn("w-2 h-2 rounded-full", h.color)} />
+                      {h.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {linkedHabit && (
+              <p className="text-xs text-muted-foreground font-dm-sans">
+                Esta sesión contará para <span className="text-accent font-medium">{linkedHabit.name}</span>
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Controls */}
-        <div className="flex justify-center gap-3">
+        <div className="flex justify-center gap-3 flex-wrap">
           <Button variant="outline" size="lg" onClick={resetTimer} className="bg-transparent" title="Reiniciar">
             <RotateCcw className="h-5 w-5" />
           </Button>
@@ -193,13 +230,7 @@ export function PomodoroTimer() {
           </Button>
 
           {sessionType === "work" && (
-            <Button
-              variant="outline"
-              size="lg"
-              onClick={skipToBreak}
-              className="bg-transparent"
-              title="Pasar al descanso"
-            >
+            <Button variant="outline" size="lg" onClick={skipToBreak} className="bg-transparent" title="Pasar al descanso">
               <SkipForward className="h-5 w-5" />
             </Button>
           )}
@@ -208,11 +239,7 @@ export function PomodoroTimer() {
             <Button
               variant="outline"
               size="lg"
-              onClick={() => {
-                setTimerState("idle")
-                setSessionType("work")
-                setTimeLeft(sessionDurations.work)
-              }}
+              onClick={() => { setTimerState("idle"); setSessionType("work"); setTimeLeft(sessionDurations.work) }}
               className="bg-transparent"
               title="Volver al trabajo"
             >
@@ -223,10 +250,7 @@ export function PomodoroTimer() {
           <Button
             variant="outline"
             size="lg"
-            onClick={() => {
-              setDraftConfig(config)
-              setShowSettings((prev) => !prev)
-            }}
+            onClick={() => { setDraftConfig(config); setShowSettings((prev) => !prev) }}
             className={cn("bg-transparent", showSettings && "ring-2 ring-accent/40")}
             title="Configuración"
           >
@@ -238,7 +262,6 @@ export function PomodoroTimer() {
         {showSettings && (
           <div className="rounded-lg border border-border p-4 space-y-4">
             <h4 className="font-space-grotesk font-semibold text-sm">Configurar tiempos (minutos)</h4>
-
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="work-duration" className="text-sm">Trabajo</Label>
@@ -251,7 +274,6 @@ export function PomodoroTimer() {
                   onChange={(e) => updateDraftValue("work", e.target.value, 1, 180)}
                 />
               </div>
-
               <div className="space-y-1.5">
                 <Label htmlFor="break-duration" className="text-sm">Descanso</Label>
                 <Input
@@ -264,21 +286,16 @@ export function PomodoroTimer() {
                 />
               </div>
             </div>
-
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setShowSettings(false)}>
-                Cancelar
-              </Button>
-              <Button size="sm" onClick={saveSettings}>
-                Guardar
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowSettings(false)}>Cancelar</Button>
+              <Button size="sm" onClick={saveSettings}>Guardar</Button>
             </div>
           </div>
         )}
 
-        {/* Session Stats */}
+        {/* Stats */}
         <div className="text-center text-sm text-muted-foreground font-dm-sans">
-          Sesiones completadas hoy: {completedSessions}
+          Sesiones completadas hoy: <span className="font-semibold text-foreground">{completedSessions}</span>
         </div>
       </CardContent>
     </Card>
